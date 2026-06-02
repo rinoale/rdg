@@ -1,11 +1,13 @@
 [package]
 name = "rdg"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.96"
 
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
-crossterm = "0.29"
-ratatui = { version = "0.30", features = ["crossterm_0_29"] }
+crossterm = "0.29.0"
+notify = "8.2.0"
+ratatui = { version = "0.30.0", features = ["crossterm_0_29"] }
 tempfile = "3"
