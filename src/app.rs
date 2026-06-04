@@ -26,6 +26,7 @@ pub struct App {
     pub target: String,
     pub entries: Vec<TreeEntry>,
     pub cursor: usize,
+    pub repository_offset: usize,
     pub git_preview: String,
     pub rsync_preview: String,
     pub content_diff_preview: String,
@@ -50,6 +51,7 @@ impl App {
             target,
             entries,
             cursor: 0,
+            repository_offset: 0,
             git_preview: String::new(),
             rsync_preview: String::from(
                 "No selected files.\n\nSelect files to see the expected rsync changes against the destination.",
@@ -194,7 +196,7 @@ impl App {
 
     pub fn scroll_preview_down(&mut self) {
         match self.active_pane {
-            PreviewPane::Repository => self.scroll_repository_down(),
+            PreviewPane::Repository => {}
             PreviewPane::Content => {
                 self.content_diff_scroll = self.content_diff_scroll.saturating_add(10)
             }
@@ -205,7 +207,7 @@ impl App {
 
     pub fn scroll_preview_up(&mut self) {
         match self.active_pane {
-            PreviewPane::Repository => self.scroll_repository_up(),
+            PreviewPane::Repository => {}
             PreviewPane::Content => {
                 self.content_diff_scroll = self.content_diff_scroll.saturating_sub(10)
             }
@@ -214,36 +216,92 @@ impl App {
         }
     }
 
-    pub fn scroll_repository_down(&mut self) {
-        let visible_len = self.visible_indices().len();
+    pub fn scroll_repository_down(&mut self, viewport_rows: usize) {
+        let max_offset = self.max_repository_offset(viewport_rows);
 
-        if visible_len == 0 {
+        if viewport_rows == 0 {
             return;
         }
 
-        self.set_cursor(
-            self.cursor
-                .saturating_add(REPOSITORY_SCROLL_STEP)
-                .min(visible_len - 1),
-        );
+        self.repository_offset = self
+            .repository_view_offset(viewport_rows)
+            .saturating_add(REPOSITORY_SCROLL_STEP)
+            .min(max_offset);
+        self.clamp_cursor_to_repository_view(viewport_rows);
     }
 
-    pub fn scroll_repository_up(&mut self) {
-        self.set_cursor(self.cursor.saturating_sub(REPOSITORY_SCROLL_STEP));
+    pub fn scroll_repository_up(&mut self, viewport_rows: usize) {
+        if viewport_rows == 0 {
+            return;
+        }
+
+        self.repository_offset = self
+            .repository_view_offset(viewport_rows)
+            .saturating_sub(REPOSITORY_SCROLL_STEP);
+        self.clamp_cursor_to_repository_view(viewport_rows);
     }
 
     pub fn repository_view_offset(&self, viewport_rows: usize) -> usize {
+        self.repository_offset
+            .min(self.max_repository_offset(viewport_rows))
+    }
+
+    pub fn ensure_repository_cursor_visible(&mut self, viewport_rows: usize) {
         let visible_len = self.visible_indices().len();
 
         if visible_len == 0 || viewport_rows == 0 {
-            return 0;
+            self.repository_offset = 0;
+            return;
         }
 
         let max_offset = visible_len.saturating_sub(viewport_rows);
+        self.repository_offset = self.repository_offset.min(max_offset);
 
-        self.cursor
-            .saturating_sub(viewport_rows.saturating_sub(1))
-            .min(max_offset)
+        if self.cursor < self.repository_offset {
+            self.repository_offset = self.cursor.min(max_offset);
+            return;
+        }
+
+        let last_visible = self
+            .repository_offset
+            .saturating_add(viewport_rows.saturating_sub(1));
+
+        if self.cursor > last_visible {
+            self.repository_offset = self
+                .cursor
+                .saturating_sub(viewport_rows.saturating_sub(1))
+                .min(max_offset);
+        }
+    }
+
+    fn max_repository_offset(&self, viewport_rows: usize) -> usize {
+        if viewport_rows == 0 {
+            return 0;
+        }
+
+        self.visible_indices().len().saturating_sub(viewport_rows)
+    }
+
+    fn clamp_cursor_to_repository_view(&mut self, viewport_rows: usize) {
+        let visible_len = self.visible_indices().len();
+
+        if visible_len == 0 || viewport_rows == 0 {
+            self.repository_offset = 0;
+            self.cursor = 0;
+            return;
+        }
+
+        let offset = self.repository_view_offset(viewport_rows);
+        self.repository_offset = offset;
+
+        let last_visible = offset
+            .saturating_add(viewport_rows.saturating_sub(1))
+            .min(visible_len - 1);
+        let cursor = self.cursor.clamp(offset, last_visible);
+
+        if cursor != self.cursor {
+            self.set_cursor(cursor);
+        }
     }
 
     pub fn refresh_candidates(&mut self) -> Result<()> {
@@ -290,6 +348,7 @@ impl App {
             });
 
         self.clamp_cursor();
+        self.repository_offset = self.repository_offset.min(self.visible_indices().len());
 
         self.refresh_git_preview();
         let selected_count = self.selected_count();
@@ -558,8 +617,10 @@ impl App {
 
         if visible_len == 0 {
             self.cursor = 0;
+            self.repository_offset = 0;
         } else {
             self.cursor = self.cursor.min(visible_len - 1);
+            self.repository_offset = self.repository_offset.min(visible_len - 1);
         }
     }
 }
@@ -603,6 +664,7 @@ mod tests {
                 })
                 .collect(),
             cursor: 0,
+            repository_offset: 0,
             git_preview: String::new(),
             rsync_preview: String::new(),
             content_diff_preview: String::new(),
@@ -619,21 +681,55 @@ mod tests {
     }
 
     #[test]
-    fn repository_view_offset_tracks_rendered_top_row() {
+    fn repository_view_offset_uses_scroll_state() {
         let mut app = app_with_file_count(20);
 
-        app.cursor = 0;
+        app.repository_offset = 0;
         assert_eq!(app.repository_view_offset(5), 0);
 
-        app.cursor = 4;
-        assert_eq!(app.repository_view_offset(5), 0);
+        app.repository_offset = 7;
+        assert_eq!(app.repository_view_offset(5), 7);
 
-        app.cursor = 5;
-        assert_eq!(app.repository_view_offset(5), 1);
-
-        app.cursor = 19;
+        app.repository_offset = 30;
         assert_eq!(app.repository_view_offset(5), 15);
         assert_eq!(app.repository_view_offset(30), 0);
         assert_eq!(app.repository_view_offset(0), 0);
+    }
+
+    #[test]
+    fn repository_cursor_visibility_updates_scroll_state_only_when_needed() {
+        let mut app = app_with_file_count(20);
+
+        app.cursor = 2;
+        app.repository_offset = 5;
+        app.ensure_repository_cursor_visible(5);
+        assert_eq!(app.repository_offset, 2);
+
+        app.cursor = 12;
+        app.repository_offset = 5;
+        app.ensure_repository_cursor_visible(5);
+        assert_eq!(app.repository_offset, 8);
+
+        app.cursor = 7;
+        app.repository_offset = 5;
+        app.ensure_repository_cursor_visible(5);
+        assert_eq!(app.repository_offset, 5);
+    }
+
+    #[test]
+    fn repository_scroll_keeps_cursor_inside_visible_rows() {
+        let mut app = app_with_file_count(20);
+
+        app.scroll_repository_down(5);
+        assert_eq!(app.repository_offset, 5);
+        assert_eq!(app.cursor, 5);
+
+        app.scroll_repository_down(5);
+        assert_eq!(app.repository_offset, 10);
+        assert_eq!(app.cursor, 10);
+
+        app.scroll_repository_up(5);
+        assert_eq!(app.repository_offset, 5);
+        assert_eq!(app.cursor, 9);
     }
 }

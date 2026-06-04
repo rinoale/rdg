@@ -83,16 +83,16 @@ fn run_app(terminal: &mut Tui, app: &mut App, watcher_rx: Receiver<WatchEvent>) 
                         app.should_quit = true;
                     }
                     KeyCode::Down if key.modifiers == KeyModifiers::NONE => {
-                        app.move_down();
+                        move_repository_cursor(terminal, app, true)?;
                     }
                     KeyCode::Up if key.modifiers == KeyModifiers::NONE => {
-                        app.move_up();
+                        move_repository_cursor(terminal, app, false)?;
                     }
                     KeyCode::Char('j') => {
-                        app.move_down();
+                        move_repository_cursor(terminal, app, true)?;
                     }
                     KeyCode::Char('k') => {
-                        app.move_up();
+                        move_repository_cursor(terminal, app, false)?;
                     }
                     KeyCode::Enter | KeyCode::Char('e') => {
                         app.toggle_current_expanded();
@@ -104,10 +104,10 @@ fn run_app(terminal: &mut Tui, app: &mut App, watcher_rx: Receiver<WatchEvent>) 
                         app.collapse_current();
                     }
                     KeyCode::Down | KeyCode::PageDown => {
-                        app.scroll_preview_down();
+                        scroll_active_pane(terminal, app, true)?;
                     }
                     KeyCode::Up | KeyCode::PageUp => {
-                        app.scroll_preview_up();
+                        scroll_active_pane(terminal, app, false)?;
                     }
                     KeyCode::Char(' ') => {
                         app.toggle_current();
@@ -198,13 +198,52 @@ fn handle_mouse_scroll(
         app.set_active_pane(PreviewPane::Rsync);
     }
 
+    scroll_active_pane(terminal, app, down)?;
+
+    Ok(())
+}
+
+fn move_repository_cursor(terminal: &Tui, app: &mut App, down: bool) -> Result<()> {
     if down {
-        app.scroll_preview_down();
+        app.move_down();
     } else {
-        app.scroll_preview_up();
+        app.move_up();
+    }
+
+    app.ensure_repository_cursor_visible(repository_viewport_rows(terminal)?);
+    Ok(())
+}
+
+fn scroll_active_pane(terminal: &Tui, app: &mut App, down: bool) -> Result<()> {
+    match app.active_pane {
+        PreviewPane::Repository => {
+            let viewport_rows = repository_viewport_rows(terminal)?;
+
+            if down {
+                app.scroll_repository_down(viewport_rows);
+            } else {
+                app.scroll_repository_up(viewport_rows);
+            }
+        }
+        PreviewPane::Content | PreviewPane::Git | PreviewPane::Rsync => {
+            if down {
+                app.scroll_preview_down();
+            } else {
+                app.scroll_preview_up();
+            }
+        }
     }
 
     Ok(())
+}
+
+fn repository_viewport_rows(terminal: &Tui) -> Result<usize> {
+    Ok(usize::from(
+        ui::body_areas(terminal.size()?.into())
+            .candidates
+            .height
+            .saturating_sub(2),
+    ))
 }
 
 fn candidate_hit(
