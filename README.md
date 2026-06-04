@@ -152,10 +152,11 @@ Space           select or unselect the current file
 Enter or e      expand or collapse the current folder
 Left/Right      collapse or expand the current folder
 a               select all or clear all
+s               show only selected files; press again for the repository tree
 d               refresh the rsync destination diff
 r               run rsync for selected files after the current diff is shown
 Tab             switch scroll focus between Repository, content, Git, and rsync panes
-Mouse wheel     scroll the pane under the pointer; over Repository moves the cursor
+Mouse wheel     scroll the pane under the pointer; over Repository scrolls the file list
 Click row       move cursor to that entry; folder rows also expand/collapse
 Click checkbox  select or unselect that file or folder
 Click pane      switch scroll focus to that pane

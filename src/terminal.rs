@@ -115,6 +115,9 @@ fn run_app(terminal: &mut Tui, app: &mut App, watcher_rx: Receiver<WatchEvent>) 
                     KeyCode::Char('a') => {
                         app.toggle_all();
                     }
+                    KeyCode::Char('s') => {
+                        app.toggle_selected_only();
+                    }
                     KeyCode::Char('d') => {
                         app.refresh_rsync_preview(true);
                     }

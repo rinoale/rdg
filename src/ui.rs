@@ -122,12 +122,18 @@ fn draw_candidates(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = visible
         .iter()
         .filter_map(|index| app.entries.get(*index))
-        .map(tree_item)
+        .map(|entry| tree_item(entry, app.selected_only))
         .collect();
+
+    let title = if app.selected_only {
+        format!("Repository: selected files ({})", visible.len())
+    } else {
+        String::from("Repository")
+    };
 
     let list = List::new(items)
         .block(pane_block(
-            "Repository".to_string(),
+            title,
             app.active_pane == PreviewPane::Repository,
             Color::Yellow,
         ))
@@ -149,9 +155,13 @@ fn draw_candidates(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
-fn tree_item(entry: &TreeEntry) -> ListItem<'static> {
+fn tree_item(entry: &TreeEntry, selected_only: bool) -> ListItem<'static> {
     let checkbox = if entry.selected { "[x]" } else { "[ ]" };
-    let indent = "  ".repeat(entry.depth);
+    let indent = if selected_only {
+        String::new()
+    } else {
+        "  ".repeat(entry.depth)
+    };
     let marker = match entry.kind {
         EntryKind::Directory if entry.expanded => "v",
         EntryKind::Directory => ">",
@@ -174,7 +184,15 @@ fn tree_item(entry: &TreeEntry) -> ListItem<'static> {
         ),
         Span::raw(" "),
         Span::styled(
-            format!("{name_prefix}{}{}", entry.name, kind_suffix),
+            format!(
+                "{name_prefix}{}{}",
+                if selected_only {
+                    entry.path.as_str()
+                } else {
+                    entry.name.as_str()
+                },
+                kind_suffix
+            ),
             change_kind_style(git_kind),
         ),
     ]);
@@ -239,7 +257,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         PreviewPane::Rsync => "rsync",
     };
     let footer = Paragraph::new(format!(
-        "Click row: focus | click checkbox: select | click pane/Tab: focus ({focus}) | wheel/PgUp/PgDn: scroll focused pane | Space: select | d: diff | r: run | q: quit\n{}",
+        "Click row: focus | click checkbox: select | click pane/Tab: focus ({focus}) | wheel/PgUp/PgDn: scroll focused pane | Space: select | s: selected view | d: diff | r: run | q: quit\n{}",
         app.message
     ))
     .block(Block::default().borders(Borders::ALL));

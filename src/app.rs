@@ -27,6 +27,7 @@ pub struct App {
     pub entries: Vec<TreeEntry>,
     pub cursor: usize,
     pub repository_offset: usize,
+    pub selected_only: bool,
     pub git_preview: String,
     pub rsync_preview: String,
     pub content_diff_preview: String,
@@ -52,6 +53,7 @@ impl App {
             entries,
             cursor: 0,
             repository_offset: 0,
+            selected_only: false,
             git_preview: String::new(),
             rsync_preview: String::from(
                 "No selected files.\n\nSelect files to see the expected rsync changes against the destination.",
@@ -66,7 +68,7 @@ impl App {
             rsync_preview_stale: false,
             rsync_report: None,
             message: String::from(
-                "Space: select | d: refresh rsync diff | r: run | Tab: focus pane | q: quit",
+                "Space: select | s: selected view | d: refresh rsync diff | r: run | Tab: focus pane | q: quit",
             ),
             active_pane: PreviewPane::Repository,
             should_quit: false,
@@ -129,6 +131,10 @@ impl App {
         };
 
         self.toggle_entry_selection(index);
+        self.clamp_cursor();
+        if self.selected_only {
+            self.refresh_git_preview();
+        }
         self.refresh_rsync_preview(false);
     }
 
@@ -138,8 +144,9 @@ impl App {
         };
 
         self.cursor = visible_index;
-        self.refresh_git_preview();
         self.toggle_entry_selection(entry_index);
+        self.clamp_cursor();
+        self.refresh_git_preview();
         self.refresh_rsync_preview(false);
     }
 
@@ -150,7 +157,25 @@ impl App {
             entry.selected = !all_selected;
         }
 
+        self.clamp_cursor();
+        if self.selected_only {
+            self.refresh_git_preview();
+        }
         self.refresh_rsync_preview(false);
+    }
+
+    pub fn toggle_selected_only(&mut self) {
+        self.selected_only = !self.selected_only;
+        self.repository_offset = 0;
+        self.clamp_cursor();
+        self.refresh_git_preview();
+        self.render_rsync_preview_for_cursor();
+
+        self.message = if self.selected_only {
+            String::from("Showing selected files only. Press s to return to the repository tree.")
+        } else {
+            String::from("Showing the repository tree.")
+        };
     }
 
     pub fn toggle_current_expanded(&mut self) {
@@ -524,6 +549,15 @@ impl App {
     }
 
     pub fn visible_indices(&self) -> Vec<usize> {
+        if self.selected_only {
+            return self
+                .entries
+                .iter()
+                .enumerate()
+                .filter_map(|(index, entry)| (entry.selected && !entry.is_dir()).then_some(index))
+                .collect();
+        }
+
         let mut visible = Vec::new();
         let mut collapsed_depths = VecDeque::new();
 
@@ -665,6 +699,7 @@ mod tests {
                 .collect(),
             cursor: 0,
             repository_offset: 0,
+            selected_only: false,
             git_preview: String::new(),
             rsync_preview: String::new(),
             content_diff_preview: String::new(),
@@ -731,5 +766,45 @@ mod tests {
         app.scroll_repository_up(5);
         assert_eq!(app.repository_offset, 5);
         assert_eq!(app.cursor, 9);
+    }
+
+    #[test]
+    fn selected_only_visible_indices_show_selected_files_only() {
+        let mut app = app_with_file_count(4);
+        app.entries.insert(
+            1,
+            TreeEntry {
+                path: String::from("folder"),
+                name: String::from("folder"),
+                kind: EntryKind::Directory,
+                depth: 0,
+                git_kind: None,
+                status: String::new(),
+                selected: true,
+                expanded: false,
+            },
+        );
+        app.entries[0].selected = true;
+        app.entries[2].selected = true;
+        app.entries[4].selected = true;
+        app.selected_only = true;
+
+        assert_eq!(app.visible_indices(), vec![0, 2, 4]);
+    }
+
+    #[test]
+    fn toggle_selected_only_clamps_cursor_and_resets_repository_scroll() {
+        let mut app = app_with_file_count(8);
+        app.entries[1].selected = true;
+        app.entries[6].selected = true;
+        app.cursor = 7;
+        app.repository_offset = 5;
+
+        app.toggle_selected_only();
+
+        assert!(app.selected_only);
+        assert_eq!(app.visible_indices(), vec![1, 6]);
+        assert_eq!(app.cursor, 1);
+        assert_eq!(app.repository_offset, 0);
     }
 }
