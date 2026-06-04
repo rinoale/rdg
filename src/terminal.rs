@@ -151,10 +151,16 @@ fn handle_mouse_click(terminal: &Tui, app: &mut App, column: u16, row: u16) -> R
 
     if contains(areas.candidates, column, row) {
         app.set_active_pane(PreviewPane::Repository);
+        let viewport_rows = usize::from(areas.candidates.height.saturating_sub(2));
+        let view_offset = app.repository_view_offset(viewport_rows);
 
-        if let Some((index, toggles_selection)) =
-            candidate_hit(areas.candidates, column, row, app.visible_indices().len())
-        {
+        if let Some((index, toggles_selection)) = candidate_hit(
+            areas.candidates,
+            column,
+            row,
+            app.visible_indices().len(),
+            view_offset,
+        ) {
             if toggles_selection {
                 app.toggle_candidate_at(index);
             } else {
@@ -206,6 +212,7 @@ fn candidate_hit(
     column: u16,
     row: u16,
     len: usize,
+    view_offset: usize,
 ) -> Option<(usize, bool)> {
     let inner_x = area.x.saturating_add(1);
     let inner_y = area.y.saturating_add(1);
@@ -215,7 +222,7 @@ fn candidate_hit(
         return None;
     }
 
-    let index = usize::from(row - inner_y);
+    let index = view_offset.saturating_add(usize::from(row - inner_y));
 
     if index >= len {
         return None;

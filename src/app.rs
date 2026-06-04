@@ -232,6 +232,20 @@ impl App {
         self.set_cursor(self.cursor.saturating_sub(REPOSITORY_SCROLL_STEP));
     }
 
+    pub fn repository_view_offset(&self, viewport_rows: usize) -> usize {
+        let visible_len = self.visible_indices().len();
+
+        if visible_len == 0 || viewport_rows == 0 {
+            return 0;
+        }
+
+        let max_offset = visible_len.saturating_sub(viewport_rows);
+
+        self.cursor
+            .saturating_sub(viewport_rows.saturating_sub(1))
+            .min(max_offset)
+    }
+
     pub fn refresh_candidates(&mut self) -> Result<()> {
         let selected_paths: HashSet<String> = self
             .entries
@@ -566,4 +580,60 @@ fn folder_preview(entry: &TreeEntry, file_count: usize) -> String {
     preview.push_str("Use Enter/e or Left/Right to collapse and expand folders.\n");
 
     preview
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app_with_file_count(file_count: usize) -> App {
+        App {
+            repo_root: PathBuf::new(),
+            target: String::new(),
+            entries: (0..file_count)
+                .map(|index| TreeEntry {
+                    path: format!("file-{index}.txt"),
+                    name: format!("file-{index}.txt"),
+                    kind: EntryKind::File,
+                    depth: 0,
+                    git_kind: None,
+                    status: String::new(),
+                    selected: false,
+                    expanded: true,
+                })
+                .collect(),
+            cursor: 0,
+            git_preview: String::new(),
+            rsync_preview: String::new(),
+            content_diff_preview: String::new(),
+            git_scroll: 0,
+            rsync_scroll: 0,
+            content_diff_scroll: 0,
+            rsync_dry_run_ready: false,
+            rsync_preview_stale: false,
+            rsync_report: None,
+            message: String::new(),
+            active_pane: PreviewPane::Repository,
+            should_quit: false,
+        }
+    }
+
+    #[test]
+    fn repository_view_offset_tracks_rendered_top_row() {
+        let mut app = app_with_file_count(20);
+
+        app.cursor = 0;
+        assert_eq!(app.repository_view_offset(5), 0);
+
+        app.cursor = 4;
+        assert_eq!(app.repository_view_offset(5), 0);
+
+        app.cursor = 5;
+        assert_eq!(app.repository_view_offset(5), 1);
+
+        app.cursor = 19;
+        assert_eq!(app.repository_view_offset(5), 15);
+        assert_eq!(app.repository_view_offset(30), 0);
+        assert_eq!(app.repository_view_offset(0), 0);
+    }
 }

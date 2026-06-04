@@ -138,7 +138,9 @@ fn draw_candidates(frame: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         );
 
-    let mut list_state = ListState::default();
+    let viewport_rows = usize::from(area.height.saturating_sub(2));
+    let mut list_state =
+        ListState::default().with_offset(app.repository_view_offset(viewport_rows));
 
     if !visible.is_empty() {
         list_state.select(Some(app.cursor));
