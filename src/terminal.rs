@@ -128,8 +128,12 @@ fn run_app(terminal: &mut Tui, app: &mut App, watcher_rx: Receiver<WatchEvent>) 
                 }
             }
             Event::Mouse(mouse) => match mouse.kind {
-                MouseEventKind::ScrollDown => app.scroll_preview_down(),
-                MouseEventKind::ScrollUp => app.scroll_preview_up(),
+                MouseEventKind::ScrollDown => {
+                    handle_mouse_scroll(terminal, app, mouse.column, mouse.row, true)?
+                }
+                MouseEventKind::ScrollUp => {
+                    handle_mouse_scroll(terminal, app, mouse.column, mouse.row, false)?
+                }
                 MouseEventKind::Down(MouseButton::Left) => {
                     handle_mouse_click(terminal, app, mouse.column, mouse.row)?;
                 }
@@ -146,6 +150,8 @@ fn handle_mouse_click(terminal: &Tui, app: &mut App, column: u16, row: u16) -> R
     let areas = ui::body_areas(terminal.size()?.into());
 
     if contains(areas.candidates, column, row) {
+        app.set_active_pane(PreviewPane::Repository);
+
         if let Some((index, toggles_selection)) =
             candidate_hit(areas.candidates, column, row, app.visible_indices().len())
         {
@@ -162,6 +168,34 @@ fn handle_mouse_click(terminal: &Tui, app: &mut App, column: u16, row: u16) -> R
         app.set_active_pane(PreviewPane::Git);
     } else if contains(areas.rsync, column, row) {
         app.set_active_pane(PreviewPane::Rsync);
+    }
+
+    Ok(())
+}
+
+fn handle_mouse_scroll(
+    terminal: &Tui,
+    app: &mut App,
+    column: u16,
+    row: u16,
+    down: bool,
+) -> Result<()> {
+    let areas = ui::body_areas(terminal.size()?.into());
+
+    if contains(areas.candidates, column, row) {
+        app.set_active_pane(PreviewPane::Repository);
+    } else if contains(areas.content, column, row) {
+        app.set_active_pane(PreviewPane::Content);
+    } else if contains(areas.git, column, row) {
+        app.set_active_pane(PreviewPane::Git);
+    } else if contains(areas.rsync, column, row) {
+        app.set_active_pane(PreviewPane::Rsync);
+    }
+
+    if down {
+        app.scroll_preview_down();
+    } else {
+        app.scroll_preview_up();
     }
 
     Ok(())

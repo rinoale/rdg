@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     collections::{HashMap, HashSet},
     fs,
     path::{Component, Path},
@@ -76,7 +77,7 @@ pub fn repo_tree_entries(repo_root: &Path) -> Result<Vec<TreeEntry>> {
         &mut known_paths,
     );
 
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries.sort_by(|a, b| compare_tree_paths(&a.path, &b.path));
 
     Ok(entries)
 }
@@ -133,7 +134,7 @@ fn walk_dir(
             git_kind,
             status,
             selected: false,
-            expanded: true,
+            expanded: !is_dir,
         });
 
         if is_dir {
@@ -179,7 +180,7 @@ fn add_deleted_entries(
                     .or(Some(ChangeKind::Deleted)),
                 status: String::new(),
                 selected: false,
-                expanded: true,
+                expanded: false,
             });
         }
 
@@ -258,6 +259,40 @@ fn normalize_path(path: &Path) -> String {
 
 fn path_depth(path: &str) -> usize {
     path.matches('/').count()
+}
+
+fn compare_tree_paths(left: &str, right: &str) -> Ordering {
+    let mut left_parts = left.split('/');
+    let mut right_parts = right.split('/');
+
+    loop {
+        match (left_parts.next(), right_parts.next()) {
+            (Some(left), Some(right)) => match left.cmp(right) {
+                Ordering::Equal => {}
+                ordering => return ordering,
+            },
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (None, None) => return Ordering::Equal,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tree_sort_keeps_descendants_under_parent() {
+        let mut paths = vec!["a.txt", "a/b.txt", "a", "a/b", "a/b/c.txt", "b"];
+
+        paths.sort_by(|left, right| compare_tree_paths(left, right));
+
+        assert_eq!(
+            paths,
+            vec!["a", "a/b", "a/b/c.txt", "a/b.txt", "a.txt", "b"]
+        );
+    }
 }
 
 fn path_name(path: &str) -> String {

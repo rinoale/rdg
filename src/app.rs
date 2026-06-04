@@ -13,10 +13,13 @@ use crate::core::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PreviewPane {
+    Repository,
     Content,
     Git,
     Rsync,
 }
+
+const REPOSITORY_SCROLL_STEP: usize = 5;
 
 pub struct App {
     pub repo_root: PathBuf,
@@ -63,7 +66,7 @@ impl App {
             message: String::from(
                 "Space: select | d: refresh rsync diff | r: run | Tab: focus pane | q: quit",
             ),
-            active_pane: PreviewPane::Content,
+            active_pane: PreviewPane::Repository,
             should_quit: false,
         };
 
@@ -182,14 +185,16 @@ impl App {
 
     pub fn toggle_active_pane(&mut self) {
         self.active_pane = match self.active_pane {
+            PreviewPane::Repository => PreviewPane::Content,
             PreviewPane::Content => PreviewPane::Git,
             PreviewPane::Git => PreviewPane::Rsync,
-            PreviewPane::Rsync => PreviewPane::Content,
+            PreviewPane::Rsync => PreviewPane::Repository,
         };
     }
 
     pub fn scroll_preview_down(&mut self) {
         match self.active_pane {
+            PreviewPane::Repository => self.scroll_repository_down(),
             PreviewPane::Content => {
                 self.content_diff_scroll = self.content_diff_scroll.saturating_add(10)
             }
@@ -200,12 +205,31 @@ impl App {
 
     pub fn scroll_preview_up(&mut self) {
         match self.active_pane {
+            PreviewPane::Repository => self.scroll_repository_up(),
             PreviewPane::Content => {
                 self.content_diff_scroll = self.content_diff_scroll.saturating_sub(10)
             }
             PreviewPane::Git => self.git_scroll = self.git_scroll.saturating_sub(10),
             PreviewPane::Rsync => self.rsync_scroll = self.rsync_scroll.saturating_sub(10),
         }
+    }
+
+    pub fn scroll_repository_down(&mut self) {
+        let visible_len = self.visible_indices().len();
+
+        if visible_len == 0 {
+            return;
+        }
+
+        self.set_cursor(
+            self.cursor
+                .saturating_add(REPOSITORY_SCROLL_STEP)
+                .min(visible_len - 1),
+        );
+    }
+
+    pub fn scroll_repository_up(&mut self) {
+        self.set_cursor(self.cursor.saturating_sub(REPOSITORY_SCROLL_STEP));
     }
 
     pub fn refresh_candidates(&mut self) -> Result<()> {

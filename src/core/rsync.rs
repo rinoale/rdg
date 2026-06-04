@@ -115,10 +115,10 @@ impl RsyncRunReport {
 
         let matching_lines = matching_itemized_lines(&self.stdout, path);
 
-        if matching_lines.is_empty() {
-            report.push_str("No destination content change for current file.\n");
-        } else if let Some(diff) = self.content_diffs.get(path) {
+        if let Some(diff) = self.content_diffs.get(path) {
             report.push_str(diff);
+        } else if matching_lines.is_empty() {
+            report.push_str("No destination content change for current file.\n");
         } else {
             report.push_str("No textual content diff is available for this rsync change.\n");
         }
@@ -144,7 +144,12 @@ impl RsyncRunReport {
         report.push_str(path);
         report.push_str("\n\n");
 
-        if matching_lines.is_empty() {
+        if matching_lines.is_empty() && self.content_diffs.contains_key(path) {
+            report.push_str(
+                "No itemized rsync change was reported for this file.\n\
+                 A destination content diff was still computed from the destination snapshot.\n",
+            );
+        } else if matching_lines.is_empty() {
             report.push_str("(no destination change for current file)\n");
         } else {
             report.push_str("Itemized rsync change:\n");
@@ -458,7 +463,7 @@ fn content_diffs(
     for candidate in selected {
         let lines = matching_itemized_lines(stdout, &candidate.path);
 
-        if lines.is_empty() || !itemized_change_needs_content_diff(candidate, &lines) {
+        if !content_diff_should_be_rendered(candidate, &lines) {
             continue;
         }
 
@@ -491,10 +496,15 @@ fn paths_requiring_destination_snapshot(selected: &[Candidate], stdout: &str) ->
         .filter(|candidate| {
             let lines = matching_itemized_lines(stdout, &candidate.path);
 
-            itemized_change_needs_content_diff(candidate, &lines) && !itemized_change_is_new(&lines)
+            content_diff_should_be_rendered(candidate, &lines) && !itemized_change_is_new(&lines)
         })
         .map(|candidate| candidate.path.clone())
         .collect()
+}
+
+fn content_diff_should_be_rendered(candidate: &Candidate, lines: &[&str]) -> bool {
+    itemized_change_needs_content_diff(candidate, lines)
+        || (candidate.kind == ChangeKind::Changed && lines.is_empty())
 }
 
 fn itemized_change_needs_content_diff(candidate: &Candidate, lines: &[&str]) -> bool {

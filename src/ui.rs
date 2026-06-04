@@ -126,7 +126,11 @@ fn draw_candidates(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Repository"))
+        .block(pane_block(
+            "Repository".to_string(),
+            app.active_pane == PreviewPane::Repository,
+            Color::Yellow,
+        ))
         .highlight_symbol("> ")
         .highlight_style(
             Style::default()
@@ -227,12 +231,13 @@ fn draw_rsync_preview(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     let focus = match app.active_pane {
+        PreviewPane::Repository => "repository",
         PreviewPane::Content => "content",
         PreviewPane::Git => "git",
         PreviewPane::Rsync => "rsync",
     };
     let footer = Paragraph::new(format!(
-        "Click row: focus | click checkbox: select | click pane/Tab: focus ({focus}) | wheel/PgUp/PgDn: scroll | Space: select | d: diff | r: run | q: quit\n{}",
+        "Click row: focus | click checkbox: select | click pane/Tab: focus ({focus}) | wheel/PgUp/PgDn: scroll focused pane | Space: select | d: diff | r: run | q: quit\n{}",
         app.message
     ))
     .block(Block::default().borders(Borders::ALL));
@@ -240,7 +245,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(footer, area);
 }
 
-fn preview_block(title: String, active: bool, color: Color) -> Block<'static> {
+fn pane_block(title: String, active: bool, color: Color) -> Block<'static> {
     let border_style = if active {
         Style::default().fg(color)
     } else {
@@ -254,6 +259,10 @@ fn preview_block(title: String, active: bool, color: Color) -> Block<'static> {
             title,
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         ))
+}
+
+fn preview_block(title: String, active: bool, color: Color) -> Block<'static> {
+    pane_block(title, active, color)
 }
 
 fn change_kind_style(kind: ChangeKind) -> Style {

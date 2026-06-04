@@ -10,8 +10,9 @@ expected rsync destination changes before you deploy.
 - Shows repository files and folders under the Git repository root, not only
   changed files. The `.git` and `target` directories are excluded.
 - Colors files and folders by Git state: changed, untracked, deleted, or clean.
-- Folders are expandable/collapsible and selectable. Selecting a folder includes
-  all descendant files in the rsync preview and deploy.
+- Folders start collapsed, are expandable/collapsible, and are selectable.
+  Selecting a folder includes all descendant files in the rsync preview and
+  deploy.
 - Auto-refreshes when files are created, updated, renamed, or deleted under the Git
   repository root.
 - Preserves selected entries and expanded folders across refreshes when paths
@@ -153,14 +154,14 @@ Left/Right      collapse or expand the current folder
 a               select all or clear all
 d               refresh the rsync destination diff
 r               run rsync for selected files after the current diff is shown
-Tab             switch scroll focus between content, Git, and rsync panes
-Mouse wheel     scroll the focused preview pane
+Tab             switch scroll focus between Repository, content, Git, and rsync panes
+Mouse wheel     scroll the pane under the pointer; over Repository moves the cursor
 Click row       move cursor to that entry; folder rows also expand/collapse
 Click checkbox  select or unselect that file or folder
 Click pane      switch scroll focus to that pane
-PgUp/PgDn       scroll the focused preview pane
+PgUp/PgDn       scroll the focused pane
 Shift/Ctrl/Alt + Up/Down
-                scroll the focused preview pane when the terminal sends modified arrows
+                scroll the focused pane when the terminal sends modified arrows
 q or Esc        quit
 ```
 
