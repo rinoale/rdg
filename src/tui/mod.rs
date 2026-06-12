@@ -1,3 +1,9 @@
+pub mod command;
+pub mod keymap;
+pub mod menu;
+pub mod style;
+pub mod theme;
+
 use std::{
     io::{self, Stdout},
     sync::mpsc::Receiver,
@@ -7,8 +13,8 @@ use std::{
 use anyhow::Result;
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-        MouseButton, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers, MouseButton, MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -20,6 +26,8 @@ use crate::{
     core::watcher::{self, WatchEvent},
     ui,
 };
+
+use self::keymap::{Intent, text_input_modifiers};
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
@@ -60,76 +68,16 @@ fn restore_terminal(terminal: &mut Tui) -> Result<()> {
 }
 
 fn run_app(terminal: &mut Tui, app: &mut App, watcher_rx: Receiver<WatchEvent>) -> Result<()> {
-    loop {
+    while !app.should_quit() {
         refresh_after_fs_events(app, &watcher_rx);
         terminal.draw(|frame| ui::draw(frame, app))?;
-
-        if app.should_quit {
-            break;
-        }
 
         if !event::poll(Duration::from_millis(200))? {
             continue;
         }
 
         match event::read()? {
-            Event::Key(key) => {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => {
-                        app.should_quit = true;
-                    }
-                    KeyCode::Down if key.modifiers == KeyModifiers::NONE => {
-                        move_repository_cursor(terminal, app, true)?;
-                    }
-                    KeyCode::Up if key.modifiers == KeyModifiers::NONE => {
-                        move_repository_cursor(terminal, app, false)?;
-                    }
-                    KeyCode::Char('j') => {
-                        move_repository_cursor(terminal, app, true)?;
-                    }
-                    KeyCode::Char('k') => {
-                        move_repository_cursor(terminal, app, false)?;
-                    }
-                    KeyCode::Enter | KeyCode::Char('e') => {
-                        app.toggle_current_expanded();
-                    }
-                    KeyCode::Right => {
-                        app.expand_current();
-                    }
-                    KeyCode::Left => {
-                        app.collapse_current();
-                    }
-                    KeyCode::Down | KeyCode::PageDown => {
-                        scroll_active_pane(terminal, app, true)?;
-                    }
-                    KeyCode::Up | KeyCode::PageUp => {
-                        scroll_active_pane(terminal, app, false)?;
-                    }
-                    KeyCode::Char(' ') => {
-                        app.toggle_current();
-                    }
-                    KeyCode::Char('a') => {
-                        app.toggle_all();
-                    }
-                    KeyCode::Char('s') => {
-                        app.toggle_selected_only();
-                    }
-                    KeyCode::Char('d') => {
-                        app.refresh_rsync_preview(true);
-                    }
-                    KeyCode::Char('r') => {
-                        app.deploy_rsync();
-                    }
-                    KeyCode::Tab => {
-                        app.toggle_active_pane();
-                    }
-                    _ => {}
-                }
-            }
+            Event::Key(key) if key.kind == KeyEventKind::Press => handle_key(terminal, app, key)?,
             Event::Mouse(mouse) => match mouse.kind {
                 MouseEventKind::ScrollDown => {
                     handle_mouse_scroll(terminal, app, mouse.column, mouse.row, true)?
@@ -144,6 +92,101 @@ fn run_app(terminal: &mut Tui, app: &mut App, watcher_rx: Receiver<WatchEvent>) 
             },
             _ => {}
         }
+    }
+
+    Ok(())
+}
+
+fn handle_key(terminal: &Tui, app: &mut App, key: KeyEvent) -> Result<()> {
+    if handle_command_text_key(app, key) {
+        return Ok(());
+    }
+
+    if let Some(intent) = app.keymap.intent_for(key) {
+        handle_intent(terminal, app, intent)?;
+        return Ok(());
+    }
+
+    handle_local_key(terminal, app, key)
+}
+
+fn handle_command_text_key(app: &mut App, key: KeyEvent) -> bool {
+    if !app.command_mode || !text_input_modifiers(key.modifiers) {
+        return false;
+    }
+
+    match key.code {
+        KeyCode::Backspace => {
+            app.pop_command_char();
+            true
+        }
+        KeyCode::Char(ch) => {
+            app.push_command_char(ch);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn handle_intent(terminal: &Tui, app: &mut App, intent: Intent) -> Result<()> {
+    if app.command_mode {
+        match intent {
+            Intent::Cancel => app.cancel_transient_state(),
+            Intent::Activate => app.submit_command(),
+            Intent::MoveUp => app.previous_command(),
+            Intent::MoveDown => app.next_command(),
+            Intent::Help => app.show_help(),
+            _ => {}
+        }
+        return Ok(());
+    }
+
+    match intent {
+        Intent::EnterCommandMode => app.enter_command_mode(),
+        Intent::Cancel => app.cancel_transient_state(),
+        Intent::Help => app.show_help(),
+        Intent::NextPane => app.toggle_active_pane(),
+        Intent::PreviousPane => app.toggle_active_pane_reverse(),
+        Intent::Activate => app.toggle_current_expanded(),
+        Intent::MoveUp => move_repository_cursor(terminal, app, false)?,
+        Intent::MoveDown => move_repository_cursor(terminal, app, true)?,
+        Intent::MoveLeft => app.collapse_current(),
+        Intent::MoveRight => app.expand_current(),
+        Intent::Search => app.set_message("Search is not implemented for rdg."),
+    }
+
+    Ok(())
+}
+
+fn handle_local_key(terminal: &Tui, app: &mut App, key: KeyEvent) -> Result<()> {
+    if key.modifiers != KeyModifiers::NONE {
+        match key.code {
+            KeyCode::Down | KeyCode::PageDown => scroll_active_pane(terminal, app, true)?,
+            KeyCode::Up | KeyCode::PageUp => scroll_active_pane(terminal, app, false)?,
+            _ => {}
+        }
+        return Ok(());
+    }
+
+    match key.code {
+        KeyCode::Char('j') => move_repository_cursor(terminal, app, true)?,
+        KeyCode::Char('k') => move_repository_cursor(terminal, app, false)?,
+        KeyCode::Char('e') => app.toggle_current_expanded(),
+        KeyCode::Char(' ') => app.toggle_current(),
+        KeyCode::Char('a') => app.toggle_all(),
+        KeyCode::Char('s') => app.toggle_selected_only(),
+        KeyCode::Char('d') => {
+            app.refresh_rsync_preview(true);
+        }
+        KeyCode::Char('r') => app.deploy_rsync(),
+        KeyCode::F(5) => {
+            if let Err(err) = app.refresh_candidates() {
+                app.set_message(format!("Refresh failed: {err:#}"));
+            }
+        }
+        KeyCode::PageDown => scroll_active_pane(terminal, app, true)?,
+        KeyCode::PageUp => scroll_active_pane(terminal, app, false)?,
+        _ => {}
     }
 
     Ok(())

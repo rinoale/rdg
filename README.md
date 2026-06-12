@@ -45,11 +45,17 @@ not repeatedly refresh the UI.
     ├── core
     │   ├── git.rs      # git root/status/diff logic
     │   ├── mod.rs      # shared core helpers
-│   ├── rsync.rs    # rsync command execution and report building
-│   ├── tree.rs     # repository tree, Git status coloring, folder selection
-│   └── watcher.rs  # repository filesystem watcher
+    │   ├── rsync.rs    # rsync command execution and report building
+    │   ├── tree.rs     # repository tree, Git status coloring, folder selection
+    │   └── watcher.rs  # repository filesystem watcher
     ├── main.rs         # entrypoint
-    ├── terminal.rs     # terminal setup and input/event loop
+    ├── tui
+    │   ├── mod.rs       # terminal setup and input/event loop
+    │   ├── command.rs   # Vim-style command parsing
+    │   ├── keymap.rs    # intent-based key bindings
+    │   ├── menu.rs      # top hints and help text
+    │   ├── style.rs     # design tokens, roles, selectors, and style DSL
+    │   └── theme.rs     # named themes built from design rules
     └── ui.rs           # Ratatui rendering and preview styling
 ```
 
@@ -147,7 +153,9 @@ rdg
 Common keys:
 
 ```text
-Up/Down or j/k  move through files
+:               enter command mode
+Up/Down         move through files
+j/k             move through files
 Space           select or unselect the current file
 Enter or e      expand or collapse the current folder
 Left/Right      collapse or expand the current folder
@@ -156,6 +164,10 @@ s               show only selected files; press again for the repository tree
 d               refresh the rsync destination diff
 r               run rsync for selected files after the current diff is shown
 Tab             switch scroll focus between Repository, content, Git, and rsync panes
+Shift-Tab       switch scroll focus in reverse
+F5              refresh repository candidates
+?               show help overlay
+Esc             cancel transient UI; it never quits
 Mouse wheel     scroll the pane under the pointer; over Repository scrolls the file list
 Click row       move cursor to that entry; folder rows also expand/collapse
 Click checkbox  select or unselect that file or folder
@@ -163,8 +175,37 @@ Click pane      switch scroll focus to that pane
 PgUp/PgDn       scroll the focused pane
 Shift/Ctrl/Alt + Up/Down
                 scroll the focused pane when the terminal sends modified arrows
-q or Esc        quit
 ```
+
+Command mode:
+
+```text
+:q, :quit, :exit     quit
+:help, :?            show help
+:theme neutral       neutral theme
+:theme safe          green safe theme
+:theme danger        red danger theme
+:refresh             reload repository candidates
+:diff                refresh the rsync destination diff
+:run, :deploy        run rsync after the current diff is shown
+:select              select or unselect the current row
+:all                 select all or clear all
+:selected            show selected files only
+:tree                show the repository tree
+:focus <pane>        focus repository, content, git, or rsync
+:expand              expand the current folder
+:collapse            collapse the current folder
+```
+
+The TUI follows the `rustui` interface policy from `~/git/rustui`: quit is
+command-mode only, bare `q` is not a global quit key, and `Ctrl-C` is not bound
+to quit by default.
+
+`rdg` also follows the `rustui` design DSL guidance. A theme is a design
+stylesheet, not only a palette switch: `src/tui/style.rs` defines color tokens,
+typed roles, and string selectors, while `src/tui/theme.rs` maps those selectors
+to Ratatui styles. UI elements such as focused panels, footer keys, badges, Git
+status rows, and diff lines use named roles/selectors instead of ad hoc colors.
 
 ## Notes
 

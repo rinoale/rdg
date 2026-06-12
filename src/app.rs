@@ -10,6 +10,11 @@ use crate::core::{
     rsync::{RsyncRunReport, rsync_selected},
     tree::{EntryKind, TreeEntry, repo_tree_entries},
 };
+use crate::tui::{
+    command::{self, Command, ThemeCommand},
+    keymap::Keymap,
+    theme::ThemeKind,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PreviewPane {
@@ -38,7 +43,14 @@ pub struct App {
     pub rsync_preview_stale: bool,
     pub rsync_report: Option<RsyncRunReport>,
     pub message: String,
+    pub command_input: String,
+    pub command_mode: bool,
+    pub command_history: Vec<String>,
+    pub command_history_cursor: Option<usize>,
+    pub show_help: bool,
+    pub theme_kind: ThemeKind,
     pub active_pane: PreviewPane,
+    pub keymap: Keymap,
     pub should_quit: bool,
 }
 
@@ -67,10 +79,15 @@ impl App {
             rsync_dry_run_ready: false,
             rsync_preview_stale: false,
             rsync_report: None,
-            message: String::from(
-                "Space: select | s: selected view | d: refresh rsync diff | r: run | Tab: focus pane | q: quit",
-            ),
+            message: String::from("Press : for commands, ? for help, or Tab to change focus."),
+            command_input: String::new(),
+            command_mode: false,
+            command_history: Vec::new(),
+            command_history_cursor: None,
+            show_help: false,
+            theme_kind: ThemeKind::Neutral,
             active_pane: PreviewPane::Repository,
+            keymap: Keymap::default(),
             should_quit: false,
         };
 
@@ -80,6 +97,10 @@ impl App {
 
     pub fn selected_count(&self) -> usize {
         self.selected_candidates().len()
+    }
+
+    pub fn should_quit(&self) -> bool {
+        self.should_quit
     }
 
     pub fn move_down(&mut self) {
@@ -123,6 +144,139 @@ impl App {
 
     pub fn set_active_pane(&mut self, pane: PreviewPane) {
         self.active_pane = pane;
+    }
+
+    pub fn enter_command_mode(&mut self) {
+        self.command_mode = true;
+        self.command_input.clear();
+        self.command_input.push(':');
+        self.command_history_cursor = None;
+        self.message = String::from("command mode");
+    }
+
+    pub fn cancel_transient_state(&mut self) {
+        if self.show_help {
+            self.show_help = false;
+            self.message = String::from("help closed");
+        } else if self.command_mode {
+            self.command_mode = false;
+            self.command_input.clear();
+            self.command_history_cursor = None;
+            self.message = String::from("command canceled");
+        } else {
+            self.message = String::from("nothing to cancel");
+        }
+    }
+
+    pub fn push_command_char(&mut self, ch: char) {
+        if self.command_mode {
+            self.command_input.push(ch);
+            self.command_history_cursor = None;
+        }
+    }
+
+    pub fn pop_command_char(&mut self) {
+        if self.command_mode && self.command_input.len() > 1 {
+            self.command_input.pop();
+            self.command_history_cursor = None;
+        }
+    }
+
+    pub fn previous_command(&mut self) {
+        if !self.command_mode || self.command_history.is_empty() {
+            return;
+        }
+
+        let index = self
+            .command_history_cursor
+            .map_or(self.command_history.len().saturating_sub(1), |cursor| {
+                cursor.saturating_sub(1)
+            });
+        self.command_history_cursor = Some(index);
+        self.command_input = self.command_history[index].clone();
+    }
+
+    pub fn next_command(&mut self) {
+        if !self.command_mode {
+            return;
+        }
+
+        let Some(cursor) = self.command_history_cursor else {
+            return;
+        };
+
+        if cursor + 1 < self.command_history.len() {
+            self.command_history_cursor = Some(cursor + 1);
+            self.command_input = self.command_history[cursor + 1].clone();
+        } else {
+            self.command_history_cursor = None;
+            self.command_input.clear();
+            self.command_input.push(':');
+        }
+    }
+
+    pub fn submit_command(&mut self) {
+        let command = self.command_input.trim().to_string();
+        self.command_mode = false;
+        self.command_input.clear();
+        self.command_history_cursor = None;
+
+        if command.is_empty() || command == ":" {
+            self.message = String::from("empty command");
+            return;
+        }
+
+        self.command_history.push(command.clone());
+        self.run_command(&command);
+    }
+
+    pub fn run_command(&mut self, input: &str) {
+        match command::parse(input) {
+            Command::Quit { force: _ } => self.should_quit = true,
+            Command::Help => self.show_help(),
+            Command::Theme(theme) => self.set_theme(theme),
+            Command::Refresh => {
+                if let Err(err) = self.refresh_candidates() {
+                    self.message = format!("Refresh failed: {err:#}");
+                }
+            }
+            Command::Diff => {
+                self.refresh_rsync_preview(true);
+            }
+            Command::Deploy => self.deploy_rsync(),
+            Command::Select => self.toggle_current(),
+            Command::SelectAll => self.toggle_all(),
+            Command::SelectedOnly => {
+                if !self.selected_only {
+                    self.toggle_selected_only();
+                } else {
+                    self.message = String::from("Already showing selected files only.");
+                }
+            }
+            Command::Tree => {
+                if self.selected_only {
+                    self.toggle_selected_only();
+                } else {
+                    self.message = String::from("Already showing the repository tree.");
+                }
+            }
+            Command::Focus(pane) => {
+                self.active_pane = pane;
+                self.message = format!("Focused {} pane.", pane.label());
+            }
+            Command::Expand => self.expand_current(),
+            Command::Collapse => self.collapse_current(),
+            Command::Unknown(name) => {
+                self.message = if name == "focus" {
+                    String::from("usage: :focus repository|content|git|rsync")
+                } else {
+                    format!("unknown rdg command: :{name}")
+                };
+            }
+            Command::Empty => {
+                self.message = String::from("empty command");
+            }
+        }
     }
 
     pub fn toggle_current(&mut self) {
@@ -217,6 +371,29 @@ impl App {
             PreviewPane::Git => PreviewPane::Rsync,
             PreviewPane::Rsync => PreviewPane::Repository,
         };
+    }
+
+    pub fn toggle_active_pane_reverse(&mut self) {
+        self.active_pane = match self.active_pane {
+            PreviewPane::Repository => PreviewPane::Rsync,
+            PreviewPane::Content => PreviewPane::Repository,
+            PreviewPane::Git => PreviewPane::Content,
+            PreviewPane::Rsync => PreviewPane::Git,
+        };
+    }
+
+    pub fn show_help(&mut self) {
+        self.show_help = true;
+        self.message = String::from("help opened");
+    }
+
+    fn set_theme(&mut self, theme: ThemeCommand) {
+        self.theme_kind = match theme {
+            ThemeCommand::Neutral => ThemeKind::Neutral,
+            ThemeCommand::Safe => ThemeKind::Safe,
+            ThemeCommand::Danger => ThemeKind::Danger,
+        };
+        self.message = format!("theme: {}", self.theme_kind.theme().name);
     }
 
     pub fn scroll_preview_down(&mut self) {
@@ -659,6 +836,17 @@ impl App {
     }
 }
 
+impl PreviewPane {
+    pub fn label(self) -> &'static str {
+        match self {
+            PreviewPane::Repository => "repository",
+            PreviewPane::Content => "content",
+            PreviewPane::Git => "git",
+            PreviewPane::Rsync => "rsync",
+        }
+    }
+}
+
 fn folder_preview(entry: &TreeEntry, file_count: usize) -> String {
     let mut preview = String::new();
 
@@ -710,7 +898,14 @@ mod tests {
             rsync_preview_stale: false,
             rsync_report: None,
             message: String::new(),
+            command_input: String::new(),
+            command_mode: false,
+            command_history: Vec::new(),
+            command_history_cursor: None,
+            show_help: false,
+            theme_kind: ThemeKind::Neutral,
             active_pane: PreviewPane::Repository,
+            keymap: Keymap::default(),
             should_quit: false,
         }
     }
@@ -806,5 +1001,37 @@ mod tests {
         assert_eq!(app.visible_indices(), vec![1, 6]);
         assert_eq!(app.cursor, 1);
         assert_eq!(app.repository_offset, 0);
+    }
+
+    #[test]
+    fn command_mode_submits_quit_command() {
+        let mut app = app_with_file_count(1);
+
+        app.enter_command_mode();
+        app.push_command_char('q');
+        app.submit_command();
+
+        assert!(app.should_quit);
+        assert!(!app.command_mode);
+        assert_eq!(app.command_history, vec![":q"]);
+    }
+
+    #[test]
+    fn command_history_moves_between_prior_commands() {
+        let mut app = app_with_file_count(1);
+        app.command_history = vec![":help".to_string(), ":tree".to_string()];
+
+        app.enter_command_mode();
+        app.previous_command();
+        assert_eq!(app.command_input, ":tree");
+
+        app.previous_command();
+        assert_eq!(app.command_input, ":help");
+
+        app.next_command();
+        assert_eq!(app.command_input, ":tree");
+
+        app.next_command();
+        assert_eq!(app.command_input, ":");
     }
 }

@@ -1,7 +1,7 @@
 mod app;
 mod cli;
 mod core;
-mod terminal;
+mod tui;
 mod ui;
 
 use anyhow::{Context, Result};
@@ -16,5 +16,5 @@ fn main() -> Result<()> {
         "Missing target.\n\nUsage:\n  rdg user@example.com:/var/www/my-app/\n\nOr:\n  RDG_TARGET=user@example.com:/var/www/my-app/ rdg",
     )?;
 
-    terminal::run(App::new(target)?)
+    tui::run(App::new(target)?)
 }
